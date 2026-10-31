@@ -4,10 +4,13 @@
 Static analysis only: it never executes the code it scans. Stdlib only, so there is
 nothing to trust but this one file.
 
-Usage:  vetter.py <path | git-url> [--json]
-Exit codes: 0 = green, 1 = yellow (review), 2 = red (do not install)
+Usage:  vetter.py <path | git-url> [--json] [--ignore FILE]
+Exit codes: 0 = green, 1 = yellow (review), 2 = red (do not install), 3 = usage error
+
+--ignore FILE: your own allowlist, one "<rule-id> <path-glob>" per line (# comments).
+It is never read from the scanned package itself, so a package cannot silence its own findings.
 """
-import json, os, re, shutil, subprocess, sys, tempfile, unicodedata
+import fnmatch, json, os, re, shutil, subprocess, sys, tempfile, unicodedata
 
 RULES = [  # (id, severity, description, regex)
  ("pipe-to-shell", "high", "Downloads and pipes to a shell", r"(curl|wget)[^\n|]*\|\s*(sudo\s+)?(ba|z)?sh"),
@@ -31,6 +34,25 @@ SEV = {"high": 3, "medium": 2, "low": 1}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv"}
 INVISIBLE = {"​", "‌", "‍", "⁠", "﻿", "‮", "‭", "⁦", "⁧", "⁨", "⁩"}
 TEXT_EXT_LIMIT = 2_000_000
+RULE_IDS = {r[0] for r in RULES} | {"binary", "hidden-unicode", "minified", "install-script", "setup-py", "hooks", "mcp-server", "symlink"}
+
+def load_ignores(path):
+    """Parse an ignore file into (rule, glob) pairs. Raises ValueError on bad lines."""
+    out = []
+    for i, line in enumerate(open(path, encoding="utf-8"), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            raise ValueError(f"{path}:{i}: expected '<rule-id> <path-glob>', got {line!r}")
+        if parts[0] != "*" and parts[0] not in RULE_IDS:
+            print(f"warning: {path}:{i}: unknown rule id {parts[0]!r}", file=sys.stderr)
+        out.append((parts[0], parts[1]))
+    return out
+
+def is_ignored(f, ignores):
+    return any(rule in ("*", f[0]) and fnmatch.fnmatch(f[3], glob) for rule, glob in ignores)
 
 def scan_file(path, rel):
     out = []
@@ -86,9 +108,20 @@ def verdict(findings):
     return {3: "RED", 2: "YELLOW", 1: "GREEN", 0: "GREEN"}[top]
 
 def main(argv):
-    if len(argv) < 2:
+    args, as_json, ignores = argv[1:], "--json" in argv, []
+    if "--ignore" in args:
+        i = args.index("--ignore")
+        if i + 1 >= len(args):
+            print("error: --ignore needs a file", file=sys.stderr); return 3
+        try:
+            ignores = load_ignores(args[i + 1])
+        except (OSError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr); return 3
+        del args[i:i + 2]
+    args = [a for a in args if a != "--json"]
+    if len(args) != 1:
         print(__doc__); return 3
-    target, as_json = argv[1], "--json" in argv
+    target = args[0]
     tmp = None
     if re.match(r"^(https://|git@)", target):
         tmp = tempfile.mkdtemp(prefix="vetter-")
@@ -100,12 +133,17 @@ def main(argv):
         findings, n = scan(target)
     finally:
         if tmp: shutil.rmtree(tmp, ignore_errors=True)
+    ignored = [f for f in findings if is_ignored(f, ignores)]
+    findings = [f for f in findings if not is_ignored(f, ignores)]
     v = verdict(findings)
     if as_json:
-        print(json.dumps({"verdict": v, "files": n, "findings": [dict(zip(("rule", "severity", "desc", "file", "line", "snippet"), f)) for f in findings]}, indent=2))
+        keys = ("rule", "severity", "desc", "file", "line", "snippet")
+        print(json.dumps({"verdict": v, "files": n, "findings": [dict(zip(keys, f)) for f in findings],
+                          "ignored": [dict(zip(keys, f)) for f in ignored]}, indent=2))
     else:
         icon = {"RED": "🔴", "YELLOW": "🟡", "GREEN": "🟢"}[v]
-        print(f"{icon} {v}  ({n} files scanned, {len(findings)} findings)\n")
+        extra = f", {len(ignored)} ignored" if ignores else ""
+        print(f"{icon} {v}  ({n} files scanned, {len(findings)} findings{extra})\n")
         for f in sorted(findings, key=lambda f: -SEV[f[1]]):
             print(f"[{f[1].upper():6}] {f[0]}: {f[2]}\n         {f[3]}:{f[4]}  {f[5]}")
         print({"RED": "\nDo NOT install until you've manually reviewed the high items.",

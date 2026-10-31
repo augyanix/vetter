@@ -18,7 +18,24 @@ You get a verdict, with the file and line behind every finding:
 | 🟡 YELLOW | 1 | Review the flagged items first. |
 | 🔴 RED | 2 | Do **not** install until you've reviewed the high items. |
 
-Add `--json` for machine-readable output (e.g. in CI).
+Add `--json` for machine-readable output (e.g. in CI), and `--ignore FILE` to accept findings you've already reviewed.
+
+<details>
+<summary><b>Ignore file</b></summary>
+
+One `<rule-id> <path-glob>` per line; `*` matches any rule or path, `#` starts a comment.
+
+```
+# reviewed 2026-10-31: build script legitimately shells out
+subprocess      scripts/build.py
+network-call    *
+```
+
+- vetter reads an ignore file **only** when you pass `--ignore`. A `.vetterignore` (or any other file) shipped inside the scanned package is never used, so a package can't silence its own findings.
+- Ignored findings still show up: as a count in the summary line, and in full under `"ignored"` in `--json` output.
+- A typo in a rule id prints a warning, and a malformed line exits with code 3, so a broken ignore file never fails silently.
+
+</details>
 
 <details>
 <summary><b>What it checks</b></summary>
@@ -54,7 +71,7 @@ Rules live in the `RULES` list at the top of `vetter.py`; add a rule + a fixture
 ## Roadmap
 - [x] Static rule scan, local + GitHub URL, JSON output
 - [ ] Dependency vulnerability check (OSV)
-- [ ] Allowlist / ignore file
+- [x] Allowlist / ignore file
 - [ ] GitHub Action + SARIF output
 - [ ] Optional AI-assisted review pass
 

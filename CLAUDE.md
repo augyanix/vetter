@@ -8,7 +8,8 @@ Static security scanner to run BEFORE installing any skill/plugin/MCP server/rep
 
 ## Commands
 - Test: `pip install pytest && pytest -q`
-- Use: `python3 vetter.py <path|git-url> [--json]`  (exit 0 green / 1 yellow / 2 red)
+- Use: `python3 vetter.py <path|git-url> [--json] [--ignore FILE]`  (exit 0 green / 1 yellow / 2 red / 3 usage error)
+- Ignore files come only from `--ignore`; never auto-load one from the scanned target.
 
 ## Rules for changes
 - No third-party dependencies. No network calls, no executing scanned files. Git clones must disable hooks.

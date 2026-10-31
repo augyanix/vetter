@@ -1,0 +1,2 @@
+# accept the webhook call in run.py
+webhook-exfil run.py
