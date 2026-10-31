@@ -1,6 +1,6 @@
 import os, subprocess, sys
 HERE = os.path.dirname(__file__)
-SCRIPT = os.path.join(HERE, "..", "skillguard.py")
+SCRIPT = os.path.join(HERE, "..", "vetter.py")
 
 def run(name):
     return subprocess.run([sys.executable, SCRIPT, os.path.join(HERE, "fixtures", name)], capture_output=True, text=True)

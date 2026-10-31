@@ -1,13 +1,13 @@
-# skillguard
+# vetter
 
-Scan any skill, plugin, MCP server or open-source repo for security red flags **before you install it**.
+Scan any skill, plugin, connector, package, MCP server or open-source repo for security red flags **before you install it**.
 One file, Python standard library only: read all of it in 5 minutes. It never runs the code it scans.
 
 ## Quick start
 
 ```bash
-python3 skillguard.py ./some-skill                         # local folder
-python3 skillguard.py https://github.com/user/repo         # GitHub repo (shallow clone, never executed)
+python3 vetter.py ./some-skill                         # local folder
+python3 vetter.py https://github.com/user/repo         # GitHub repo (shallow clone, never executed)
 ```
 
 You get a verdict, with the file and line behind every finding:
@@ -47,7 +47,7 @@ A green result means "no known red flags", not "safe". It is rule-based static a
 pip install pytest && pytest
 ```
 
-Rules live in the `RULES` list at the top of `skillguard.py`; add a rule + a fixture + a test.
+Rules live in the `RULES` list at the top of `vetter.py`; add a rule + a fixture + a test.
 
 </details>
 

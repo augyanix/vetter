@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""skillguard - scan a skill/plugin/repo for security red flags BEFORE you install it.
+"""vetter - scan a skill/plugin/repo for security red flags BEFORE you install it.
 
 Static analysis only: it never executes the code it scans. Stdlib only, so there is
 nothing to trust but this one file.
 
-Usage:  skillguard.py <path | git-url> [--json]
+Usage:  vetter.py <path | git-url> [--json]
 Exit codes: 0 = green, 1 = yellow (review), 2 = red (do not install)
 """
 import json, os, re, shutil, subprocess, sys, tempfile, unicodedata
@@ -91,7 +91,7 @@ def main(argv):
     target, as_json = argv[1], "--json" in argv
     tmp = None
     if re.match(r"^(https://|git@)", target):
-        tmp = tempfile.mkdtemp(prefix="skillguard-")
+        tmp = tempfile.mkdtemp(prefix="vetter-")
         env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
         subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "clone", "--depth", "1", "--no-recurse-submodules", target, tmp + "/repo"],
                        check=True, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
