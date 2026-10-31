@@ -13,14 +13,14 @@ It is never read from the scanned package itself, so a package cannot silence it
 import fnmatch, json, os, re, shutil, subprocess, sys, tempfile, unicodedata
 
 RULES = [  # (id, severity, description, regex)
- ("pipe-to-shell", "high", "Downloads and pipes to a shell", r"(curl|wget)[^\n|]*\|\s*(sudo\s+)?(ba|z)?sh"),
+ ("pipe-to-shell", "high", "Downloads and pipes to a shell", r"(curl|wget)[^\n|]{0,300}\|\s*(sudo\s+)?(ba|z)?sh"),
  ("eval-exec", "high", "Dynamic code execution (eval/exec of built strings)", r"\b(eval|exec)\s*\(\s*(base64|atob|decode|compile|[\"'])"),
  ("base64-decode-exec", "high", "Decodes base64 then executes", r"(base64\s+-d|b64decode|atob)\s*\(?.{0,80}(sh|exec|eval|bash)"),
- ("secret-file-access", "high", "Reads credential locations", r"(\.ssh/|\.aws/credentials|\.npmrc|\.env\b|\.netrc|id_rsa|\.config/gh|\.claude/\.credentials|keychain)"),
+ ("secret-file-access", "high", "Reads credential locations", r"(\.ssh/|\.aws/credentials|\.npmrc|(?<![\w$])\.env\b|\.netrc|id_rsa|\.config/gh|\.claude/\.credentials|keychain)"),
  ("env-exfil", "high", "Sends environment/secrets over network", r"(os\.environ|process\.env)[^\n]{0,120}(requests\.|fetch\(|http|curl|axios)"),
  ("webhook-exfil", "high", "Posts to known exfil/webhook endpoints", r"(discord(app)?\.com/api/webhooks|webhook\.site|pastebin\.com|transfer\.sh|ngrok\.io|requestbin|pipedream\.net|burpcollaborator)"),
- ("reverse-shell", "high", "Reverse shell pattern", r"(/dev/tcp/|nc\s+-e|bash\s+-i\s*>&|socat\s+.*exec|mkfifo\s+/tmp)"),
- ("destructive", "high", "Destructive filesystem command", r"(rm\s+-rf\s+(/|~|\$HOME)|mkfs\.|dd\s+if=.*of=/dev/)"),
+ ("reverse-shell", "high", "Reverse shell pattern", r"(/dev/tcp/|nc\s+-e|bash\s+-i\s*>&|socat\s+.{0,200}exec|mkfifo\s+/tmp)"),
+ ("destructive", "high", "Destructive filesystem command", r"(rm\s+-rf\s+(/|~|\$HOME)|mkfs\.|dd\s+if=.{0,200}of=/dev/)"),
  ("prompt-injection", "high", "Prompt-injection language aimed at the AI agent", r"(ignore (all |any )?(previous|prior|above) (instructions|rules)|do not (tell|inform|reveal to) the user|without (telling|informing|asking) the user|disregard (your|the) (system|safety))"),
  ("perm-bypass", "high", "Disables safety/permission checks", r"(--dangerously-skip-permissions|bypassPermissions|dangerouslyDisableSandbox|--no-verify|chmod\s+(-R\s+)?777)"),
  ("persistence", "medium", "Persistence mechanism (cron/shell rc/launch agents)", r"(crontab|\.bashrc|\.zshrc|\.profile|LaunchAgents|systemctl\s+enable|authorized_keys)"),
@@ -34,7 +34,7 @@ SEV = {"high": 3, "medium": 2, "low": 1}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv"}
 INVISIBLE = {"​", "‌", "‍", "⁠", "﻿", "‮", "‭", "⁦", "⁧", "⁨", "⁩"}
 TEXT_EXT_LIMIT = 2_000_000
-RULE_IDS = {r[0] for r in RULES} | {"binary", "hidden-unicode", "minified", "install-script", "setup-py", "hooks", "mcp-server", "symlink"}
+RULE_IDS = {r[0] for r in RULES} | {"binary", "hidden-unicode", "minified", "too-large", "install-script", "setup-py", "hooks", "mcp-server", "symlink"}
 
 def load_ignores(path):
     """Parse an ignore file into (rule, glob) pairs. Raises ValueError on bad lines."""
@@ -57,23 +57,29 @@ def is_ignored(f, ignores):
 def scan_file(path, rel):
     out = []
     try:
-        data = open(path, "rb").read(TEXT_EXT_LIMIT)
+        data = open(path, "rb").read(TEXT_EXT_LIMIT + 1)
     except OSError:
         return out
     if b"\0" in data[:4096]:
         if os.access(path, os.X_OK) or rel.endswith((".exe", ".dll", ".so", ".dylib", ".bin")):
             out.append(("binary", "medium", "Bundled executable/binary - cannot be inspected", rel, 0, ""))
         return out
+    if len(data) > TEXT_EXT_LIMIT:
+        data = data[:TEXT_EXT_LIMIT]
+        out.append(("too-large", "medium", f"Text file over {TEXT_EXT_LIMIT // 1_000_000} MB - only the start was scanned", rel, 0, ""))
     text = data.decode("utf-8", "replace")
     inv = [c for c in text if c in INVISIBLE or unicodedata.category(c) == "Cf"]
     if inv:
         out.append(("hidden-unicode", "high", f"{len(inv)} invisible/bidi characters (can hide instructions)", rel, 0, ""))
     for i, line in enumerate(text.splitlines(), 1):
-        if len(line) > 3000:
-            out.append(("minified", "medium", "Very long line (minified/obfuscated?)", rel, i, line[:80])); continue
+        long = len(line) > 3000
+        if long:  # still run the rules: a payload must not hide at the end of a long line
+            out.append(("minified", "medium", "Very long line (minified/obfuscated?)", rel, i, line[:80]))
         for rid, sev, desc, rx in RULES:
-            if re.search(rx, line, re.I):
-                out.append((rid, sev, desc, rel, i, line.strip()[:120]))
+            m = re.search(rx, line, re.I)
+            if m:
+                snippet = line[max(0, m.start() - 20):m.end() + 20] if long else line.strip()
+                out.append((rid, sev, desc, rel, i, snippet[:120]))
     base = os.path.basename(path)
     if base == "package.json":
         try:
